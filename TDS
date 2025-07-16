@@ -1,0 +1,52 @@
+.github/workflows/ios-build.yml
+name: Build iOS App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby and Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+
+      - name: Install Fastlane
+        run: gem install fastlane
+
+      - name: Decode certificate and provisioning profile
+        run: |
+          mkdir -p ~/certs
+          echo "${{ secrets.CERTIFICATE_P12 }}" | base64 --decode > ~/certs/cert.p12
+          echo "${{ secrets.PROVISIONING_PROFILE }}" | base64 --decode > ~/certs/profile.mobileprovision
+
+      - name: Setup Keychain and Import Certificate
+        run: |
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import ~/certs/cert.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
+      - name: Build the IPA with Fastlane
+        run: |
+          fastlane gym \
+            --scheme "TDS_Carplay" \
+            --export_method "ad-hoc" \
+            --output_directory "./output" \
+            --output_name "TDSCarplay.ipa" \
+            --clean \
+            --codesigning_identity "iPhone Distribution" \
+            --export_options "{\"provisioningProfiles\": {\"com.tds.carplay\": \"Your Provisioning Profile Name\"}}"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: output/TDSCarplay.ipa
